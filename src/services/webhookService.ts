@@ -1,11 +1,15 @@
 import { AnalysisFormState, GeneratedSignal, SignalDirection, Timeframe, WebhookSourcePayload } from '../types/reasontrack';
 
-const N8N_WEBHOOK_URL = 'https://tradeosai.app.n8n.cloud/webhook/analyze-market';
+const rawWebhookUrl = import.meta.env.VITE_N8N_WEBHOOK_URL as string | undefined;
+const N8N_WEBHOOK_URL = rawWebhookUrl?.trim();
 
 type RawWebhookResponse = Partial<WebhookSourcePayload> | Array<Partial<WebhookSourcePayload>> | null | undefined;
 
 export async function callN8nWebhook(form: AnalysisFormState): Promise<GeneratedSignal> {
   validateAnalyzeForm(form);
+  if (!N8N_WEBHOOK_URL) {
+    throw new Error('Missing VITE_N8N_WEBHOOK_URL');
+  }
 
   const payload = {
     pair: requireString(form.pair, 'pair'),
@@ -16,13 +20,21 @@ export async function callN8nWebhook(form: AnalysisFormState): Promise<Generated
     experience: requireString(form.experience, 'experience').toLowerCase(),
   };
 
+  console.debug('[deploy] env check', {
+    hasSupabaseUrl: Boolean(import.meta.env.VITE_SUPABASE_URL),
+    hasSupabaseAnonKey: Boolean(import.meta.env.VITE_SUPABASE_ANON_KEY),
+    hasWebhookUrl: Boolean(N8N_WEBHOOK_URL),
+  });
+  console.debug('[deploy] webhook URL', N8N_WEBHOOK_URL);
   console.debug('[analyze] payload', payload);
 
   const response = await fetch(N8N_WEBHOOK_URL, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
+      Accept: 'application/json',
     },
+    mode: 'cors',
     body: JSON.stringify(payload),
   });
 

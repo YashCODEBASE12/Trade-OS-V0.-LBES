@@ -5,6 +5,12 @@ const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undef
 
 const supabaseUrl = rawSupabaseUrl?.replace(/\/rest\/v1\/?$/, '');
 
+console.debug('[deploy] env check', {
+  hasSupabaseUrl: Boolean(supabaseUrl),
+  hasSupabaseAnonKey: Boolean(supabaseAnonKey),
+  hasWebhookUrl: Boolean(import.meta.env.VITE_N8N_WEBHOOK_URL),
+});
+
 if (!supabaseUrl || !supabaseAnonKey) {
   console.error('Missing Supabase environment variables');
 }
@@ -55,4 +61,3 @@ export async function signOut() {
 export function getUserEmail(user: User | null) {
   return user?.email ?? '';
 }
-
