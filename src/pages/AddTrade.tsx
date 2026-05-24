@@ -64,10 +64,10 @@ const AddTrade = () => {
   }, [draft, reset, clearDraft]);
 
   const direction = watch('direction');
-  const entry = parseFloat(watch('entry_price') as any);
-  const sl = parseFloat(watch('stop_loss') as any);
-  const tp = parseFloat(watch('take_profit') as any);
-  const risk = parseFloat(watch('risk_usd') as any);
+  const entry = parseFloat(watch('entry_price') as unknown as string);
+  const sl = parseFloat(watch('stop_loss') as unknown as string);
+  const tp = parseFloat(watch('take_profit') as unknown as string);
+  const risk = parseFloat(watch('risk_usd') as unknown as string);
 
   useEffect(() => {
     if (entry && sl && tp) {

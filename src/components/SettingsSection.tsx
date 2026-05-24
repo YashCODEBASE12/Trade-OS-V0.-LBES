@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { ChevronDown, ChevronUp } from 'lucide-react';
-import { Card, CardContent, CardHeader } from './ui/Card';
+import { Card } from './ui/Card';
 import { cn } from '../lib/utils';
 
 interface SettingsSectionProps {

@@ -9,7 +9,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     const root = document.documentElement;
     
     // Helper to flatten and set properties
-    const setProperties = (obj: any, prefix: string = '--color') => {
+    const setProperties = (obj: Record<string, unknown>, prefix: string = '--color'): void => {
       Object.entries(obj).forEach(([key, value]) => {
         if (typeof value === 'string') {
           root.style.setProperty(`${prefix}-${key}`, value);

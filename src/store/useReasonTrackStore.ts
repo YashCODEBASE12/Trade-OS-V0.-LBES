@@ -1,44 +1,56 @@
 import { create } from 'zustand';
-import { saveAnalysis } from '../services/analysisService';
 import {
   closeTrade as closeRemoteTrade,
-  createTradeFromSignal,
   deleteAllTrades,
   deleteTrade as deleteRemoteTrade,
   fetchTrades,
 } from '../services/tradeService';
 import { saveWeeklyReview } from '../services/reviewService';
+import { getOrCreateGuestId } from '../services/guestService';
 import { ActivityTrade, GeneratedSignal, TradeOutcome } from '../types/reasontrack';
 
 interface ReasonTrackState {
   defaultCapital: number;
   trades: ActivityTrade[];
   userId: string | null;
+  guestId: string | null;
   loading: boolean;
   error: string | null;
   setDefaultCapital: (capital: number) => void;
-  loadTrades: (userId: string) => Promise<void>;
+  loadTrades: (userId?: string | null) => Promise<void>;
   addTradeFromSignal: (signal: GeneratedSignal) => Promise<void>;
   closeTrade: (id: string, outcome: TradeOutcome, resultR: number) => Promise<void>;
   deleteTrade: (id: string) => Promise<void>;
   importTrades: (trades: ActivityTrade[]) => void;
   clearAllTrades: () => Promise<void>;
   reset: () => void;
+  setUserId: (userId: string | null) => void;
 }
 
 export const useReasonTrackStore = create<ReasonTrackState>((set, get) => ({
   defaultCapital: 2500,
   trades: [],
   userId: null,
+  guestId: null,
   loading: false,
   error: null,
 
   setDefaultCapital: (capital) => set({ defaultCapital: capital }),
 
+  setUserId: (userId) => {
+    set({ userId });
+  },
+
   loadTrades: async (userId) => {
-    set({ loading: true, error: null, userId });
+    set({ loading: true, error: null });
+    
+    const actualUserId = userId ?? get().userId;
+    const guestId = !actualUserId ? getOrCreateGuestId() : null;
+    
+    set({ userId: actualUserId, guestId });
+    
     try {
-      const trades = await fetchTrades(userId);
+      const trades = await fetchTrades(actualUserId, guestId);
       set({ trades, loading: false });
     } catch (error) {
       set({ loading: false, error: getErrorMessage(error) });
@@ -46,26 +58,27 @@ export const useReasonTrackStore = create<ReasonTrackState>((set, get) => ({
   },
 
   addTradeFromSignal: async (signal) => {
-    const userId = get().userId;
-    if (!userId) {
-      set({ error: 'Sign in to save trades to Supabase.' });
-      return;
-    }
+    const guestId = get().guestId || getOrCreateGuestId();
 
     set({ loading: true, error: null });
     try {
-      const trade = await createTradeFromSignal(userId, signal);
-      await saveAnalysis(userId, signal, trade.id);
-      set((state) => ({ trades: [trade, ...state.trades], loading: false }));
+      // Supabase save is temporarily disabled while stabilizing the live webhook render path.
+      const trade: ActivityTrade = {
+        ...signal,
+        status: 'open',
+        tradeNotes: '',
+        reviewed: false,
+        ruleFollowed: true,
+      };
+      set((state) => ({ trades: [trade, ...state.trades], loading: false, guestId }));
     } catch (error) {
-      set({ loading: false, error: getErrorMessage(error) });
+      const message = getErrorMessage(error);
+      set({ loading: false, error: message });
+      throw new Error(message);
     }
   },
 
   closeTrade: async (id, outcome, resultR) => {
-    const userId = get().userId;
-    if (!userId) return;
-
     const previousTrades = get().trades;
     set((state) => ({
       trades: state.trades.map((trade) =>
@@ -89,7 +102,11 @@ export const useReasonTrackStore = create<ReasonTrackState>((set, get) => ({
         trade.id === id ? { ...trade, ...updatedTrade } : trade,
       );
       set({ trades: nextTrades });
-      await saveWeeklyReview(userId, nextTrades);
+      
+      const userId = get().userId;
+      if (userId) {
+        await saveWeeklyReview(userId, nextTrades);
+      }
     } catch (error) {
       set({ trades: previousTrades, error: getErrorMessage(error) });
     }
@@ -109,11 +126,12 @@ export const useReasonTrackStore = create<ReasonTrackState>((set, get) => ({
 
   clearAllTrades: async () => {
     const userId = get().userId;
+    const guestId = get().guestId;
     const previousTrades = get().trades;
     set({ trades: [], error: null });
-    if (!userId) return;
+    
     try {
-      await deleteAllTrades(userId);
+      await deleteAllTrades(userId, guestId);
     } catch (error) {
       set({ trades: previousTrades, error: getErrorMessage(error) });
     }

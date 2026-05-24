@@ -167,7 +167,7 @@ const Trades = () => {
                 <div className="border-t pt-4 space-y-2">
                   <div className="flex justify-between items-center">
                     <span className="font-semibold">Result</span>
-                    <Badge variant={selectedTrade.outcome as any}>{selectedTrade.outcome.toUpperCase()}</Badge>
+                    <Badge variant={selectedTrade.outcome as 'win' | 'loss' | 'open' | 'break-even'}>{selectedTrade.outcome.toUpperCase()}</Badge>
                   </div>
                   <div className="flex justify-between items-center">
                     <span className="text-sm text-slate-500">Realized R</span>

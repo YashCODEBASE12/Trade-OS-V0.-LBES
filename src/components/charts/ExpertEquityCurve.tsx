@@ -80,7 +80,7 @@ export function ExpertEquityCurve() {
   }, [equityData]);
 
   // Custom tooltip
-  const CustomTooltip = ({ active, payload }: any) => {
+  const CustomTooltip = ({ active, payload }: { active?: boolean; payload?: Array<{ payload: EquityDataPoint }> }) => {
     if (active && payload && payload.length) {
       const data = payload[0].payload;
       return (
@@ -123,7 +123,7 @@ export function ExpertEquityCurve() {
   };
 
   // Custom dot for trades
-  const renderCustomDot = (props: any) => {
+  const renderCustomDot = (props: { cx: number; cy: number; payload: EquityDataPoint }) => {
     const { cx, cy, payload } = props;
     const size = Math.abs(payload.rMultiple) > 1.5 ? 6 : 4;
     

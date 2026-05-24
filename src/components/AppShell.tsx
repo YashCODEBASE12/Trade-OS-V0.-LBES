@@ -13,7 +13,7 @@ export default function AppShell() {
   const [sheet, setSheet] = useState<'signin' | 'settings' | null>(null);
   const isExecutionScreen = location.pathname === '/' || location.pathname === '/ai-trades';
   const { initialize, user } = useAuthStore();
-  const { loadTrades, reset: resetTrades } = useReasonTrackStore();
+  const { loadTrades } = useReasonTrackStore();
   const { loadProfile } = useSettingsStore();
 
   useEffect(() => {
@@ -23,17 +23,14 @@ export default function AppShell() {
   }, []);
 
   useEffect(() => {
-    initialize();
-  }, [initialize]);
-
-  useEffect(() => {
-    if (!user) {
-      resetTrades();
-      return;
+    if (user) {
+      loadProfile(user.id);
+      loadTrades(user.id);
+    } else {
+      // Load guest trades
+      loadTrades(null);
     }
-    loadProfile(user.id);
-    loadTrades(user.id);
-  }, [loadProfile, loadTrades, resetTrades, user]);
+  }, [loadProfile, loadTrades, user]);
 
   return (
     <div className="min-h-screen bg-background px-4 py-0 text-text-primary">

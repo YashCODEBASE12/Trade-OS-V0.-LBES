@@ -3,7 +3,7 @@ import { useTradesStore } from '../store/useTradesStore';
 import { ExpertEquityCurve } from '../components/charts/ExpertEquityCurve';
 import { Card } from '../components/ui/Card';
 import { Badge } from '../components/ui/Badge';
-import { ArrowRight, TrendingUp, ChartBar, Activity, Sparkles } from 'lucide-react';
+import { ArrowRight, ChartBar, Sparkles } from 'lucide-react';
 import { formatNumber } from '../lib/utils';
 
 export default function Analytics() {

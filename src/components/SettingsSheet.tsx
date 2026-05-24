@@ -2,7 +2,6 @@ import { useMemo, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
   ArrowUpFromLine,
-  BrainCircuit,
   ChevronDown,
   Cloud,
   Database,
@@ -14,7 +13,6 @@ import {
   MessageCircle,
   Palette,
   Shield,
-  SlidersHorizontal,
   Sparkles,
   Upload,
   User,

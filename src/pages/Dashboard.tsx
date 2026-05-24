@@ -4,7 +4,7 @@ import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
 import { Input } from '../components/ui/Input';
 import { Badge } from '../components/ui/Badge';
-import { Search, Filter, X, Trash2 } from 'lucide-react';
+import { Search, Filter, X } from 'lucide-react';
 import { cn, formatNumber } from '../lib/utils';
 import { Trade } from '../types';
 import { SignInModal } from '../components/SignInModal';

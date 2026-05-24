@@ -10,10 +10,18 @@ import { Input } from '../components/ui/Input';
 import { Switch } from '../components/ui/Switch';
 import { Select } from '../components/ui/Select';
 import { syncService } from '../services/sync.service';
-import { setUserId } from '../lib/storage';
-import { 
-  User, Palette, Zap, Database, Shield, 
-  LogOut, Download, Upload, Trash2, Globe, Cloud, CheckCircle
+import {
+  User,
+  Zap,
+  Database,
+  Shield,
+  LogOut,
+  Download,
+  Upload,
+  Trash2,
+  Globe,
+  Cloud,
+  CheckCircle,
 } from 'lucide-react';
 
 const Settings = () => {
@@ -44,20 +52,20 @@ const Settings = () => {
     const fileReader = new FileReader();
     if (event.target.files && event.target.files[0]) {
       fileReader.readAsText(event.target.files[0], "UTF-8");
-      fileReader.onload = e => {
+      fileReader.onload = (e: ProgressEvent<FileReader>) => {
         if (e.target?.result) {
           try {
             const parsed = JSON.parse(e.target.result as string);
             if (parsed.trades && Array.isArray(parsed.trades)) {
               importTrades(parsed.trades);
               if (parsed.settings) {
-                if (parsed.settings.profile) updateProfile(parsed.settings.profile);
-                if (parsed.settings.automation) updateAutomation(parsed.settings.automation);
-                if (parsed.settings.display) updateDisplay(parsed.settings.display);
+                if (parsed.settings.profile) updateProfile(parsed.settings.profile as Parameters<typeof updateProfile>[0]);
+                if (parsed.settings.automation) updateAutomation(parsed.settings.automation as Parameters<typeof updateAutomation>[0]);
+                if (parsed.settings.display) updateDisplay(parsed.settings.display as Parameters<typeof updateDisplay>[0]);
               }
               alert('Data imported successfully!');
             }
-          } catch (err) {
+          } catch {
             alert('Invalid file format');
           }
         }
@@ -77,9 +85,6 @@ const Settings = () => {
 
   const handleSignOut = async () => {
     await signOut();
-    // Force user isolation switch
-    setUserId('guest');
-    window.location.href = '/auth';
   };
 
   return (
@@ -148,7 +153,7 @@ const Settings = () => {
                 <label className="text-xs font-medium text-text-secondary">Trading Style</label>
                 <Select 
                   value={profile.tradingStyle}
-                  onChange={(e) => updateProfile({ tradingStyle: e.target.value as any })}
+                  onChange={(e) => updateProfile({ tradingStyle: e.target.value as 'Scalper' | 'Day Trader' | 'Swing Trader' | 'Position Trader' })}
                 >
                   <option value="Scalper">Scalper</option>
                   <option value="Day Trader">Day Trader</option>
@@ -173,7 +178,7 @@ const Settings = () => {
                 {['Conservative', 'Moderate', 'Aggressive'].map((level) => (
                   <button
                     key={level}
-                    onClick={() => updateProfile({ riskTolerance: level as any })}
+                    onClick={() => updateProfile({ riskTolerance: level as 'Conservative' | 'Moderate' | 'Aggressive' })}
                     className={`flex-1 py-2 text-xs font-medium rounded-md border transition-all ${
                       profile.riskTolerance === level 
                         ? 'bg-accent text-accent-foreground border-accent' 

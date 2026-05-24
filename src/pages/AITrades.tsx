@@ -1,15 +1,17 @@
 import { useEffect, useMemo, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { AlertCircle, ArrowLeft, Bitcoin, Brain, CandlestickChart, CheckCircle2, ChevronDown, Globe, LoaderCircle, Settings2, Shield, TriangleAlert, XCircle, Zap, ChartNoAxesColumn, Earth, OctagonAlert } from 'lucide-react';
+import { ArrowLeft, Bitcoin, Brain, CandlestickChart, CheckCircle2, ChevronDown, Globe, LoaderCircle, Settings2, Shield, TriangleAlert, Zap, ChartNoAxesColumn, Earth, OctagonAlert } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { Card, CardContent } from '../components/ui/Card';
 import { Select } from '../components/ui/Select';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
 import { pairOptions, riskRewardOptions } from '../data/reasontrack';
-import { analyzeTrade } from '../lib/reasontrack';
+import { callN8nWebhook } from '../services/webhookService';
+import { getOrCreateGuestId } from '../services/guestService';
 import { useReasonTrackStore } from '../store/useReasonTrackStore';
 import { useSettingsStore } from '../store/useSettingsStore';
+import { useAuthStore } from '../store/useAuthStore';
 import { ActivityTrade, AnalysisFormState, GeneratedSignal } from '../types/reasontrack';
 
 const defaultForm: AnalysisFormState = {
@@ -18,17 +20,21 @@ const defaultForm: AnalysisFormState = {
   capital: 2500,
   riskReward: '1:2',
   tradingStyle: 'Day Trader',
+  riskTolerance: 'Moderate',
+  experience: 'Intermediate',
 };
 
 export default function AITrades() {
   const navigate = useNavigate();
-  const { defaultCapital, addTradeFromSignal, trades, error: tradeError } = useReasonTrackStore();
+  const { defaultCapital, addTradeFromSignal, trades, error: tradeError, loadTrades } = useReasonTrackStore();
+  const { user } = useAuthStore();
   const { profile } = useSettingsStore();
   const [form, setForm] = useState<AnalysisFormState>({ ...defaultForm, capital: defaultCapital });
   const [isLoading, setIsLoading] = useState(false);
   const [signal, setSignal] = useState<GeneratedSignal | null>(null);
   const [accordionOpen, setAccordionOpen] = useState(false);
-  const [notice, setNotice] = useState<'offline' | null>(null);
+  const [notice, setNotice] = useState<'offline' | 'error' | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [progress, setProgress] = useState(0);
   const [stepIndex, setStepIndex] = useState(0);
 
@@ -40,9 +46,21 @@ export default function AITrades() {
   const averageAlignment = trades.length ? Math.round(trades.reduce((sum, trade) => sum + trade.confidence, 0) / trades.length) : 0;
   const pairIcon = getPairIcon(activePair.market);
 
+  // Initialize guest session on mount
   useEffect(() => {
-    setForm((current) => ({ ...current, capital: profile.accountSize || defaultCapital }));
-  }, [defaultCapital, profile.accountSize]);
+    getOrCreateGuestId();
+    loadTrades(user?.id);
+  }, [user?.id, loadTrades]);
+
+  useEffect(() => {
+    setForm((current) => ({
+      ...current,
+      capital: profile.accountSize || defaultCapital,
+      tradingStyle: profile.tradingStyle === 'Swing Trader' ? 'Swing' : profile.tradingStyle === 'Scalper' ? 'Scalp' : 'Day Trader',
+      riskTolerance: profile.riskTolerance,
+      experience: profile.experience,
+    }));
+  }, [defaultCapital, profile.accountSize, profile.experience, profile.riskTolerance, profile.tradingStyle]);
 
   useEffect(() => {
     const syncStatus = () => setNotice(navigator.onLine ? null : 'offline');
@@ -55,7 +73,7 @@ export default function AITrades() {
     };
   }, []);
 
-  const runAnalysis = () => {
+  const runAnalysis = async () => {
     if (!navigator.onLine) {
       setNotice('offline');
       return;
@@ -66,7 +84,10 @@ export default function AITrades() {
     setAccordionOpen(false);
     setProgress(0);
     setStepIndex(0);
+    setNotice(null);
+    setErrorMessage(null);
 
+    // Simulate progress for UX feedback
     const checkpoints = [
       { at: 850, progress: 10, step: 0 },
       { at: 1700, progress: 21, step: 1 },
@@ -75,23 +96,38 @@ export default function AITrades() {
       { at: 4250, progress: 61, step: 4 },
       { at: 5100, progress: 74, step: 5 },
       { at: 5950, progress: 88, step: 6 },
-      { at: 6800, progress: 100, step: 6 },
     ];
 
+    const checkpointTimeouts: number[] = [];
     checkpoints.forEach((checkpoint) => {
-      window.setTimeout(() => {
+      const timeout = window.setTimeout(() => {
         setProgress(checkpoint.progress);
         setStepIndex(checkpoint.step);
       }, checkpoint.at);
+      checkpointTimeouts.push(timeout);
     });
 
-    window.setTimeout(() => {
-      const nextSignal = analyzeTrade(form);
+    try {
+      const nextSignal = await callN8nWebhook(form);
       setSignal(nextSignal);
-      setAccordionOpen(nextSignal.signal !== 'NO_SIGNAL');
+      setProgress(100);
+      setStepIndex(6);
+      setAccordionOpen(true);
+      await addTradeFromSignal(nextSignal);
+    } catch (error) {
+      setNotice('error');
+      setErrorMessage(error instanceof Error ? error.message : 'Failed to analyze trade. Please try again.');
+    } finally {
       setIsLoading(false);
-    }, 7100);
+      checkpointTimeouts.forEach(timeout => window.clearTimeout(timeout));
+    }
   };
+
+  useEffect(() => {
+    if (signal) {
+      console.debug('[analyze] final rendered state', signal);
+    }
+  }, [signal]);
 
   return (
     <section className="space-y-5">
@@ -190,20 +226,19 @@ export default function AITrades() {
             </Field>
 
             <div className="grid grid-cols-2 gap-3">
-              <Field label="Timeframe">
-                <Select value={form.timeframe} onChange={(event) => setForm((current) => ({ ...current, timeframe: event.target.value as AnalysisFormState['timeframe'] }))}>
-                  <option value="1m">1m</option>
-                  <option value="15m">15m</option>
-                  <option value="1H">1H</option>
-                  <option value="4H">4H</option>
-                </Select>
-              </Field>
               <Field label="Capital">
                 <Input
                   value={String(form.capital)}
                   onChange={(event) => setForm((current) => ({ ...current, capital: Number(event.target.value) || 0 }))}
                   inputMode="numeric"
                 />
+              </Field>
+              <Field label="Risk Tolerance">
+                <Select value={form.riskTolerance} onChange={(event) => setForm((current) => ({ ...current, riskTolerance: event.target.value as AnalysisFormState['riskTolerance'] }))}>
+                  <option>Conservative</option>
+                  <option>Moderate</option>
+                  <option>Aggressive</option>
+                </Select>
               </Field>
             </div>
 
@@ -226,9 +261,29 @@ export default function AITrades() {
               </Field>
             </div>
 
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Experience">
+                <Select value={form.experience} onChange={(event) => setForm((current) => ({ ...current, experience: event.target.value as AnalysisFormState['experience'] }))}>
+                  <option>Beginner</option>
+                  <option>Intermediate</option>
+                  <option>Advanced</option>
+                </Select>
+              </Field>
+              <Field label="Pair">
+                <div className="flex h-[52px] items-center rounded-[18px] border border-white/70 bg-white/58 px-4 text-sm font-semibold text-text-secondary">
+                  {form.pair}
+                </div>
+              </Field>
+            </div>
+
             <Button variant="primary" size="lg" className="w-full" onClick={runAnalysis} disabled={isLoading}>
               {isLoading ? 'Analyzing...' : 'Analyze'}
             </Button>
+            {errorMessage ? (
+              <div className="rounded-[18px] bg-[#fff1f0] px-4 py-3 text-sm font-semibold text-[#de5246]">
+                {errorMessage}
+              </div>
+            ) : null}
             {tradeError ? (
               <div className="rounded-[18px] bg-[#fff1f0] px-4 py-3 text-sm font-semibold text-[#de5246]">
                 {tradeError}
@@ -255,38 +310,7 @@ export default function AITrades() {
           <AnalysisOverlay key="loading" progress={progress} stepIndex={stepIndex} />
         ) : signal ? (
           <motion.div key={signal.id} initial={{ opacity: 0, y: 24 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.4 }} className="space-y-4">
-            {signal.signal === 'NO_SIGNAL' ? (
-              <Card className="border-[#e5e9f3] bg-[radial-gradient(circle_at_top_right,_rgba(37,99,235,0.12),_transparent_38%),rgba(255,255,255,0.76)]">
-                <CardContent className="space-y-5 py-7">
-                  <div className="text-center">
-                    <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-[#eff6ff] text-primary">
-                      <AlertCircle className="h-6 w-6" />
-                    </div>
-                    <h2 className="mt-4 text-xl font-bold">No trade found.</h2>
-                    <p className="mt-2 text-sm leading-6 text-text-secondary">ReasonTrack blocked weak conditions.</p>
-                  </div>
-                  <div className="rounded-[24px] border border-white/75 bg-white/60 p-4">
-                    <div className="text-xs font-bold uppercase tracking-[0.18em] text-text-muted">Blocked by ReasonTrack</div>
-                    <div className="mt-3 grid gap-2">
-                      {signal.blockedReasons.map((reason, index) => (
-                        <motion.div
-                          key={reason}
-                          initial={{ opacity: 0, y: 8 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          transition={{ duration: 0.35, delay: index * 0.05 }}
-                          className="flex items-center gap-2 rounded-full bg-[#fff7ed] px-3 py-2 text-xs font-semibold text-[#c2410c]"
-                        >
-                          <XCircle className="h-3.5 w-3.5" />
-                          {reason}
-                        </motion.div>
-                      ))}
-                    </div>
-                  </div>
-                  <p className="text-center text-sm font-semibold text-text-primary">Protected capital matters more than activity.</p>
-                </CardContent>
-              </Card>
-            ) : (
-              <>
+            <>
                 <Card className={signal.signal === 'BUY'
                   ? 'overflow-hidden border-[#dff5e7] bg-[radial-gradient(circle_at_top_right,_rgba(52,199,89,0.20),_transparent_35%),linear-gradient(180deg,rgba(255,255,255,0.84)_0%,rgba(243,255,248,0.86)_100%)]'
                   : 'overflow-hidden border-[#ffe1dc] bg-[radial-gradient(circle_at_top_right,_rgba(222,82,70,0.18),_transparent_35%),linear-gradient(180deg,rgba(255,255,255,0.84)_0%,rgba(255,245,244,0.86)_100%)]'}>
@@ -295,9 +319,9 @@ export default function AITrades() {
                       <div>
                         <div className="mb-3 inline-flex rounded-full bg-[#f3e8ff] px-3 py-1 text-[10px] font-bold uppercase tracking-[0.22em] text-[#7c3aed]">LBES verified</div>
                         <div className={signal.signal === 'BUY' ? 'text-[42px] font-bold text-[#1f9d55]' : 'text-[42px] font-bold text-[#de5246]'}>
-                          {signal.signal}
+                          {signal.action}
                         </div>
-                        <SignalBars value={signal.confidence} tone={signal.signal} />
+                        <SignalBars value={signal.confidence} tone={signal.action} />
                       </div>
                       <div className="text-right">
                         <div className="text-xs font-bold uppercase tracking-[0.2em] text-text-muted">Alignment Score</div>
@@ -307,20 +331,19 @@ export default function AITrades() {
                     </div>
 
                     <div className="grid grid-cols-[112px_1fr] gap-4">
-                      <ConfidenceRing value={signal.confidence} tone={signal.signal} />
+                      <ConfidenceRing value={signal.confidence} tone={signal.action} />
                       <div className="space-y-3 rounded-[24px] border border-white/70 bg-white/58 p-4 backdrop-blur-xl">
-                        <Meter label="Signal strength" value={signal.confidence} tone={signal.signal} />
-                        <Meter label="Risk meter" value={signal.signal === 'BUY' ? 42 : 58} tone={signal.signal === 'BUY' ? 'BUY' : 'SELL'} />
+                        <Meter label="Signal strength" value={signal.confidence} tone={signal.action} />
+                        <Meter label="Risk meter" value={signal.action === 'BUY' ? 42 : 58} tone={signal.action === 'BUY' ? 'BUY' : 'SELL'} />
                       </div>
                     </div>
 
                     <div className="grid grid-cols-2 gap-3">
                       <SignalMetric label="Entry" value={String(signal.entry)} tone="entry" />
                       <SignalMetric label="Stop Loss" value={String(signal.stopLoss)} tone="stop" />
-                      <SignalMetric label="TP1" value={String(signal.tp1)} tone="tp" />
-                      <SignalMetric label="TP2" value={String(signal.tp2)} tone="tp" />
-                      <SignalMetric label="TP3" value={String(signal.tp3)} tone="tp" />
+                      <SignalMetric label="Take Profit" value={String(signal.takeProfit)} tone="tp" />
                       <SignalMetric label="Risk Reward" value={signal.riskReward} tone="rr" />
+                      <SignalMetric label="Bias" value={signal.analysis.executionBias} tone="rr" />
                     </div>
                   </CardContent>
                 </Card>
@@ -344,7 +367,8 @@ export default function AITrades() {
                           className="overflow-hidden"
                         >
                           <div className="space-y-4 pt-2">
-                            <AnalysisItem title="TRADE REASON" value={signal.analysis.tradeReason} icon={Brain} delay={0} />
+                            <AnalysisItem title="SUMMARY" value={signal.summary} icon={Shield} delay={0} />
+                            <AnalysisItem title="TRADE REASON" value={signal.reasoning} icon={Brain} delay={0.05} />
                             <AnalysisItem title="TECHNICAL ALIGNMENT" value={signal.analysis.technicalAlignment} icon={ChartNoAxesColumn} delay={0.05} />
                             <AnalysisItem title="MACRO ALIGNMENT" value={signal.analysis.macroAlignment} icon={Earth} delay={0.1} />
                             <AnalysisItem title="INVALIDATION" value={signal.analysis.invalidation} icon={OctagonAlert} delay={0.15} />
@@ -357,11 +381,10 @@ export default function AITrades() {
                   </CardContent>
                 </Card>
 
-                <Button variant="success" size="lg" className="w-full" onClick={() => addTradeFromSignal(signal)}>
-                  Auto Fill Journal
+                <Button variant="success" size="lg" className="w-full" disabled>
+                  Rendered from live webhook
                 </Button>
               </>
-            )}
           </motion.div>
         ) : null}
       </AnimatePresence>
@@ -455,69 +478,72 @@ function AnalysisItem({
 }
 
 function TrustEvidence({ signal }: { signal: GeneratedSignal }) {
-  const validationLayers = signal.validationLayers?.length
-    ? signal.validationLayers
-    : ['Liquidity aligned', 'Session aligned', 'Structure matched', 'Momentum confirmed', 'Risk window accepted', 'Setup DNA matched', 'Conflicting signals removed'];
-  const rejectedSetups = signal.rejectedSetups?.length
-    ? signal.rejectedSetups
-    : ['Conflicting structure', 'Low momentum', 'Session weakness', 'Poor alignment'];
+  const validationLayers = signal.validationLayers ?? [];
+  const rejectedSetups = signal.rejectedSetups ?? [];
+
+  if (!validationLayers.length && !rejectedSetups.length) {
+    return null;
+  }
 
   return (
     <div className="space-y-3">
-      <motion.div
-        initial={{ opacity: 0, y: 12 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.4, delay: 0.25 }}
-        className="rounded-[24px] border border-white/70 bg-white/60 p-4 backdrop-blur-xl"
-      >
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <div className="text-xs font-bold uppercase tracking-[0.18em] text-text-muted">Why this passed</div>
-            <div className="mt-1 text-sm font-semibold text-text-primary">{validationLayers.length} validation layers passed</div>
+      {validationLayers.length ? (
+        <motion.div
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.4, delay: 0.25 }}
+          className="rounded-[24px] border border-white/70 bg-white/60 p-4 backdrop-blur-xl"
+        >
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <div className="text-xs font-bold uppercase tracking-[0.18em] text-text-muted">Why this passed</div>
+              <div className="mt-1 text-sm font-semibold text-text-primary">{validationLayers.length} validation layers passed</div>
+            </div>
+            <div className="rounded-full bg-[#dcfce7] px-3 py-1 text-[10px] font-bold uppercase tracking-[0.16em] text-[#15803d]">
+              Verified
+            </div>
           </div>
-          <div className="rounded-full bg-[#dcfce7] px-3 py-1 text-[10px] font-bold uppercase tracking-[0.16em] text-[#15803d]">
-            Verified
+          <div className="mt-4 grid gap-2">
+            {validationLayers.map((layer, index) => (
+              <motion.div
+                key={layer}
+                initial={{ opacity: 0, x: -8 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ duration: 0.3, delay: 0.3 + index * 0.04 }}
+                className="flex items-center gap-2 rounded-full bg-[#ecfdf3] px-3 py-2 text-xs font-semibold text-[#15803d]"
+              >
+                <CheckCircle2 className="h-3.5 w-3.5" />
+                {layer}
+              </motion.div>
+            ))}
           </div>
-        </div>
-        <div className="mt-4 grid gap-2">
-          {validationLayers.map((layer, index) => (
-            <motion.div
-              key={layer}
-              initial={{ opacity: 0, x: -8 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ duration: 0.3, delay: 0.3 + index * 0.04 }}
-              className="flex items-center gap-2 rounded-full bg-[#ecfdf3] px-3 py-2 text-xs font-semibold text-[#15803d]"
-            >
-              <CheckCircle2 className="h-3.5 w-3.5" />
-              {layer}
-            </motion.div>
-          ))}
-        </div>
-      </motion.div>
+        </motion.div>
+      ) : null}
 
-      <motion.div
-        initial={{ opacity: 0, y: 12 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.4, delay: 0.3 }}
-        className="rounded-[24px] border border-white/70 bg-white/60 p-4 backdrop-blur-xl"
-      >
-        <div className="text-xs font-bold uppercase tracking-[0.18em] text-text-muted">Why others failed</div>
-        <div className="mt-3 grid gap-2">
-          {rejectedSetups.map((reason, index) => (
-            <motion.div
-              key={reason}
-              initial={{ opacity: 0, x: -8 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ duration: 0.3, delay: 0.35 + index * 0.04 }}
-              className="flex items-center gap-2 rounded-full bg-[#fff7ed] px-3 py-2 text-xs font-semibold text-[#c2410c]"
-            >
-              <XCircle className="h-3.5 w-3.5" />
-              {reason}
-            </motion.div>
-          ))}
-        </div>
-        <p className="mt-3 text-xs leading-5 text-text-secondary">Blocked by ReasonTrack before reaching execution.</p>
-      </motion.div>
+      {rejectedSetups.length ? (
+        <motion.div
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.4, delay: 0.3 }}
+          className="rounded-[24px] border border-white/70 bg-white/60 p-4 backdrop-blur-xl"
+        >
+          <div className="text-xs font-bold uppercase tracking-[0.18em] text-text-muted">Why others failed</div>
+          <div className="mt-3 grid gap-2">
+            {rejectedSetups.map((reason, index) => (
+              <motion.div
+                key={reason}
+                initial={{ opacity: 0, x: -8 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ duration: 0.3, delay: 0.35 + index * 0.04 }}
+                className="flex items-center gap-2 rounded-full bg-[#fff7ed] px-3 py-2 text-xs font-semibold text-[#c2410c]"
+              >
+                <CheckCircle2 className="h-3.5 w-3.5" />
+                {reason}
+              </motion.div>
+            ))}
+          </div>
+        </motion.div>
+      ) : null}
     </div>
   );
 }

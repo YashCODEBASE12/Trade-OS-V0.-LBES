@@ -18,6 +18,8 @@ export interface AnalysisFormState {
   capital: number;
   riskReward: string;
   tradingStyle: TradingStyle;
+  riskTolerance: 'Conservative' | 'Moderate' | 'Aggressive';
+  experience: 'Beginner' | 'Intermediate' | 'Advanced';
 }
 
 export interface SignalAnalysis {
@@ -26,6 +28,28 @@ export interface SignalAnalysis {
   macroAlignment: string;
   invalidation: string;
   riskProfile: string;
+  marketStructure: string;
+  liquiditySummary: string;
+  executionBias: string;
+  probabilityGrade: string;
+  executionSummary: string;
+}
+
+export interface WebhookSourcePayload {
+  final_action: string;
+  confidence: number;
+  probability_grade: string;
+  execution_bias: string;
+  entry: { price: number };
+  stop_loss: { price: number };
+  take_profit: { price: number };
+  market_structure: string;
+  liquidity_summary: string;
+  macro_alignment: string;
+  technical_alignment: string;
+  trade_reasoning: string;
+  invalidation: string;
+  execution_summary: string;
 }
 
 export interface GeneratedSignal {
@@ -33,14 +57,18 @@ export interface GeneratedSignal {
   pair: string;
   timeframe: Timeframe;
   tradingStyle: TradingStyle;
+  action: SignalDirection;
   signal: SignalState;
   confidence: number;
   entry: number;
   stopLoss: number;
+  takeProfit: number;
   tp1: number;
   tp2: number;
   tp3: number;
   riskReward: string;
+  summary: string;
+  reasoning: string;
   analysis: SignalAnalysis;
   validationLayers: string[];
   rejectedSetups: string[];
@@ -48,6 +76,8 @@ export interface GeneratedSignal {
   session: string;
   protectedSetups: number;
   createdAt: string;
+  direction: SignalState;
+  rawWebhook: WebhookSourcePayload;
 }
 
 export interface ActivityTrade extends GeneratedSignal {

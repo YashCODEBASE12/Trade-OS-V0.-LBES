@@ -6,7 +6,7 @@ interface SwitchProps extends React.InputHTMLAttributes<HTMLInputElement> {
   onCheckedChange: (checked: boolean) => void;
 }
 
-const Switch = React.forwardRef<HTMLInputElement, SwitchProps>(
+const Switch = React.forwardRef<HTMLButtonElement, SwitchProps>(
   ({ className, checked, onCheckedChange, ...props }, ref) => {
     return (
       <button
@@ -21,7 +21,7 @@ const Switch = React.forwardRef<HTMLInputElement, SwitchProps>(
             : "bg-[rgba(221,228,241,0.9)]",
           className
         )}
-        ref={ref as any}
+        ref={ref}
         {...props}
       >
         <span

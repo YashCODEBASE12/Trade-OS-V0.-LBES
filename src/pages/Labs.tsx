@@ -1,4 +1,4 @@
-import { ArrowUpRight, BrainCircuit, Globe2, Lock, Mic, Sparkles, X } from 'lucide-react';
+import { ArrowUpRight, BrainCircuit, Globe2, Lock, Mic, X } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';

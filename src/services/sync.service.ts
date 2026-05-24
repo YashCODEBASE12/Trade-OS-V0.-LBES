@@ -13,7 +13,7 @@ export class SyncService {
     return SyncService.instance;
   }
 
-  async migrateLocalData(_userId?: string) {
+  async migrateLocalData(): Promise<{ success: boolean; error?: unknown }> {
     const { data: { user }, error } = await supabase.auth.getUser();
     if (error) return { success: false, error };
     if (user) await ensureProfile(user);

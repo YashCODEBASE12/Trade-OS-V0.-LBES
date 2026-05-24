@@ -70,14 +70,14 @@ export async function saveProfile(userId: string, updates: Partial<TraderProfile
   throw result.error;
 }
 
-function fromProfileRow(row: any): TraderProfile {
+function fromProfileRow(row: Record<string, unknown>): TraderProfile {
   return {
-    displayName: row?.username ?? defaultTraderProfile.displayName,
-    tradingStyle: fromDbTradingStyle(row?.trading_style),
-    riskTolerance: fromDbRisk(row?.risk_tolerance),
+    displayName: (row?.username as string) ?? defaultTraderProfile.displayName,
+    tradingStyle: fromDbTradingStyle(row?.trading_style as string | null | undefined),
+    riskTolerance: fromDbRisk(row?.risk_tolerance as string | null | undefined),
     accountSize: Number(row?.account_size ?? defaultTraderProfile.accountSize),
-    currency: row?.currency ?? defaultTraderProfile.currency,
-    experience: fromDbExperience(row?.experience),
+    currency: (row?.currency as string) ?? defaultTraderProfile.currency,
+    experience: fromDbExperience(row?.experience as string | null | undefined),
   };
 }
 

@@ -1,11 +1,9 @@
 import React, { useState } from 'react';
-import { supabase } from '../lib/supabase';
 import { Button } from './ui/Button';
 import { Input } from './ui/Input';
 import { Modal } from './Modal';
 import { Loader2 } from 'lucide-react';
-import { syncService } from '../services/sync.service';
-import { setUserId } from '../lib/storage';
+import { useAuthStore } from '../store/useAuthStore';
 
 interface SignInModalProps {
   isOpen: boolean;
@@ -14,52 +12,27 @@ interface SignInModalProps {
 
 export const SignInModal = ({ isOpen, onClose }: SignInModalProps) => {
   const [isSignUp, setIsSignUp] = useState(false);
-  const [loading, setLoading] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [error, setError] = useState<string | null>(null);
-  const [message, setMessage] = useState<string | null>(null);
+
+  const { loading, authError, statusMessage, user, signIn, signUp, continueWithGoogle } = useAuthStore();
 
   const handleAuth = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    setLoading(true);
-    setError(null);
-    setMessage(null);
 
     try {
       if (isSignUp) {
-        const { error, data } = await supabase.auth.signUp({
-          email,
-          password,
-          options: {
-            emailRedirectTo: `${window.location.origin}/`,
-          },
-        });
-
-        if (error) throw error;
-        if (data.user && !data.session) {
-          setMessage('Check your email for the confirmation link.');
-        } else if (data.user) {
-          setUserId(data.user.id);
-          await syncService.migrateLocalData(data.user.id);
-          window.location.href = '/';
+        await signUp(email, password);
+        if (useAuthStore.getState().user) {
+          onClose();
         }
-      } else {
-        const { error, data } = await supabase.auth.signInWithPassword({
-          email,
-          password,
-        });
-        if (error) throw error;
-        if (data.user) {
-          setUserId(data.user.id);
-          await syncService.migrateLocalData(data.user.id);
-          window.location.href = '/';
-        }
+        return;
       }
-    } catch (err: any) {
-      setError(err.message || 'Authentication failed');
-    } finally {
-      setLoading(false);
+
+      await signIn(email, password);
+      onClose();
+    } catch {
+      // authError is handled by the auth store
     }
   };
 
@@ -88,21 +61,31 @@ export const SignInModal = ({ isOpen, onClose }: SignInModalProps) => {
           />
         </div>
 
-        {error ? (
+        {authError ? (
           <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
-            {error}
+            {authError}
           </div>
         ) : null}
 
-        {message ? (
+        {statusMessage ? (
           <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
-            {message}
+            {statusMessage}
           </div>
         ) : null}
 
-        <Button type="submit" className="w-full">
+        <Button type="submit" className="w-full" disabled={loading}>
           {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
           {isSignUp ? 'Create account' : 'Sign in'}
+        </Button>
+
+        <Button
+          type="button"
+          variant="outline"
+          className="w-full"
+          onClick={continueWithGoogle}
+          disabled={loading}
+        >
+          Continue with Google
         </Button>
 
         <div className="border-t border-border pt-4 text-center text-sm text-text-muted">
