@@ -1,16 +1,18 @@
 import { useMemo, useState } from 'react';
+import { useMutation } from '@tanstack/react-query';
 import { AnimatePresence, motion } from 'framer-motion';
 import { CheckCircle2, Filter, Search, Sparkles, Trash2 } from 'lucide-react';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
 import { Card, CardContent } from '../components/ui/Card';
+import { EmptyState } from '../components/ui/EmptyState';
 import { Input } from '../components/ui/Input';
 import { Select } from '../components/ui/Select';
 import { useReasonTrackStore } from '../store/useReasonTrackStore';
 import { ActivityTrade, TradeOutcome } from '../types/reasontrack';
 
 export default function Activity() {
-  const { trades, closeTrade, deleteTrade } = useReasonTrackStore();
+  const { trades, closeTrade, deleteTrade, loading } = useReasonTrackStore();
   const [query, setQuery] = useState('');
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [outcomes, setOutcomes] = useState<Record<string, TradeOutcome>>({});
@@ -22,6 +24,19 @@ export default function Activity() {
       trades.filter((trade) => `${trade.pair} ${trade.signal} ${trade.status}`.toLowerCase().includes(query.toLowerCase())),
     [query, trades],
   );
+
+  const closeMutation = useMutation({
+    mutationFn: async ({ id, outcome, resultR }: { id: string; outcome: TradeOutcome; resultR: number }) => {
+      await closeTrade(id, outcome, resultR);
+    },
+    onMutate: async ({ id }) => {
+      setExpandedId(id);
+      setReinforcementId(id);
+    },
+    onError: () => {
+      setReinforcementId(null);
+    },
+  });
 
   return (
     <section className="space-y-5">
@@ -39,20 +54,40 @@ export default function Activity() {
           <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-text-muted" />
           <Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search pair or status" className="pl-11" />
         </div>
-        <button type="button" className="premium-card flex h-12 w-12 items-center justify-center rounded-[20px]">
+        <button
+          type="button"
+          title="Filter activity"
+          aria-label="Filter activity"
+          className="premium-card flex h-12 w-12 items-center justify-center rounded-[20px]"
+        >
           <Filter className="h-4 w-4 text-text-secondary" />
         </button>
       </div>
 
-      {!filteredTrades.length ? (
-        <Card>
-          <CardContent className="space-y-3 py-8 text-center">
-            <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-primary-soft text-primary">
-              <Search className="h-5 w-5" />
-            </div>
-            <h2 className="text-lg font-bold">AI waiting for first execution</h2>
-            <p className="text-sm leading-6 text-text-secondary">Auto-filled trades from AI Trades will appear here with closing workflow and analysis context.</p>
-          </CardContent>
+      {loading ? (
+        <div className="space-y-3">
+          {Array.from({ length: 3 }).map((_, index) => (
+            <Card key={index}>
+              <CardContent className="space-y-3 py-5">
+                <div className="h-4 w-24 animate-pulse rounded-full bg-slate-200" />
+                <div className="h-3 w-40 animate-pulse rounded-full bg-slate-200" />
+                <div className="h-10 w-full animate-pulse rounded-[16px] bg-slate-200" />
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      ) : !filteredTrades.length ? (
+        <Card className="border border-white/10 bg-[rgba(255,255,255,0.04)]">
+          <EmptyState
+            icon="📭"
+            title="No trades logged yet"
+            description="Start by analyzing your first setup in the Execution screen. Every decision you capture builds your edge."
+            action={
+              <Button onClick={() => window.location.assign('/ai-trades')}>
+                Go to Execution
+              </Button>
+            }
+          />
         </Card>
       ) : (
         <div className="space-y-4">
@@ -137,12 +172,10 @@ export default function Activity() {
                                 <Button
                                   variant="primary"
                                   className="flex-1"
-                                  onClick={() => {
-                                    closeTrade(trade.id, outcome, Number(resultR || 0));
-                                    setReinforcementId(trade.id);
-                                  }}
+                                  onClick={() => closeMutation.mutate({ id: trade.id, outcome, resultR: Number(resultR || 0) })}
+                                  disabled={closeMutation.isPending && closeMutation.variables?.id === trade.id}
                                 >
-                                  Close Trade
+                                  {closeMutation.isPending && closeMutation.variables?.id === trade.id ? 'Closing...' : 'Close Trade'}
                                 </Button>
                                 <Button variant="destructive" className="px-4" onClick={() => deleteTrade(trade.id)}>
                                   <Trash2 className="h-4 w-4" />

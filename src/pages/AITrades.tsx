@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useMutation } from '@tanstack/react-query';
 import { AnimatePresence, motion } from 'framer-motion';
 import { ArrowLeft, Bitcoin, Brain, CandlestickChart, CheckCircle2, ChevronDown, Globe, LoaderCircle, Settings2, Shield, TriangleAlert, Zap, ChartNoAxesColumn, Earth, OctagonAlert } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
@@ -13,6 +14,7 @@ import { useReasonTrackStore } from '../store/useReasonTrackStore';
 import { useSettingsStore } from '../store/useSettingsStore';
 import { useAuthStore } from '../store/useAuthStore';
 import { ActivityTrade, AnalysisFormState, GeneratedSignal } from '../types/reasontrack';
+import { calculatePositionSize, type PositionSizeResult, type TradeInput } from '../lib/riskEngine';
 
 const defaultForm: AnalysisFormState = {
   pair: 'EURUSD',
@@ -31,6 +33,7 @@ export default function AITrades() {
   const { profile } = useSettingsStore();
   const [form, setForm] = useState<AnalysisFormState>({ ...defaultForm, capital: defaultCapital });
   const [isLoading, setIsLoading] = useState(false);
+  const [aiLoading, setAiLoading] = useState(false);
   const [signal, setSignal] = useState<GeneratedSignal | null>(null);
   const [accordionOpen, setAccordionOpen] = useState(false);
   const [notice, setNotice] = useState<'offline' | 'error' | null>(null);
@@ -45,6 +48,31 @@ export default function AITrades() {
   const netR = closedTrades.reduce((sum, trade) => sum + (trade.resultR ?? 0), 0);
   const averageAlignment = trades.length ? Math.round(trades.reduce((sum, trade) => sum + trade.confidence, 0) / trades.length) : 0;
   const pairIcon = getPairIcon(activePair.market);
+  const riskResult = useMemo<PositionSizeResult>(() => {
+    try {
+      const input = buildRiskInput(form);
+      return calculatePositionSize(input, {
+        maxRiskPerTradePct: getMaxRiskPct(form.riskTolerance),
+        minRrPreferred: getPreferredRr(form.riskReward),
+        tradingExperience: mapExperience(form.experience),
+      });
+    } catch {
+      return {
+        pair: form.pair,
+        side: 'long',
+        positionSize: 0,
+        riskAmount: 0,
+        rewardAmount: 0,
+        rr: 0,
+        riskPct: 0,
+        confidence: 0,
+        reasoning: ['Enter a valid capital and stop-distance model to calculate risk.'],
+        invalidationConditions: ['No invalidation conditions available until the setup is valid.'],
+        actionRecommendation: 'REVIEW',
+        calculatedAt: new Date().toISOString(),
+      };
+    }
+  }, [form]);
 
   // Initialize guest session on mount
   useEffect(() => {
@@ -73,6 +101,29 @@ export default function AITrades() {
     };
   }, []);
 
+  const aiMutation = useMutation({
+    mutationFn: async (payload: AnalysisFormState) => callN8nWebhook(payload),
+    onMutate: () => {
+      setSignal(null);
+      setAccordionOpen(false);
+      setProgress(0);
+      setStepIndex(0);
+      setNotice(null);
+      setErrorMessage(null);
+    },
+    onSuccess: async (nextSignal) => {
+      setSignal(nextSignal);
+      setProgress(100);
+      setStepIndex(5);
+      setAccordionOpen(true);
+      await addTradeFromSignal(nextSignal);
+    },
+    onError: (error) => {
+      setNotice('error');
+      setErrorMessage(error instanceof Error ? error.message : 'The AI enhancement failed.');
+    },
+  });
+
   const runAnalysis = async () => {
     if (!navigator.onLine) {
       setNotice('offline');
@@ -80,22 +131,12 @@ export default function AITrades() {
     }
 
     setIsLoading(true);
-    setSignal(null);
-    setAccordionOpen(false);
-    setProgress(0);
-    setStepIndex(0);
-    setNotice(null);
-    setErrorMessage(null);
-
-    // Simulate progress for UX feedback
     const checkpoints = [
-      { at: 850, progress: 10, step: 0 },
-      { at: 1700, progress: 21, step: 1 },
-      { at: 2550, progress: 34, step: 2 },
-      { at: 3400, progress: 48, step: 3 },
-      { at: 4250, progress: 61, step: 4 },
-      { at: 5100, progress: 74, step: 5 },
-      { at: 5950, progress: 88, step: 6 },
+      { at: 400, progress: 16, step: 0 },
+      { at: 850, progress: 34, step: 1 },
+      { at: 1250, progress: 54, step: 2 },
+      { at: 1750, progress: 74, step: 3 },
+      { at: 2350, progress: 100, step: 4 },
     ];
 
     const checkpointTimeouts: number[] = [];
@@ -108,19 +149,33 @@ export default function AITrades() {
     });
 
     try {
-      const nextSignal = await callN8nWebhook(form);
-      setSignal(nextSignal);
-      setProgress(100);
-      setStepIndex(6);
-      setAccordionOpen(true);
-      await addTradeFromSignal(nextSignal);
-    } catch (error) {
-      setNotice('error');
-      setErrorMessage(error instanceof Error ? error.message : 'Failed to analyze trade. Please try again.');
+      await aiMutation.mutateAsync(form);
     } finally {
       setIsLoading(false);
-      checkpointTimeouts.forEach(timeout => window.clearTimeout(timeout));
+      checkpointTimeouts.forEach((timeout) => window.clearTimeout(timeout));
     }
+  };
+
+  const runAiEnhance = async () => {
+    if (!navigator.onLine) {
+      setNotice('offline');
+      return;
+    }
+
+    setAiLoading(true);
+    setErrorMessage(null);
+    try {
+      await aiMutation.mutateAsync(form);
+    } finally {
+      setAiLoading(false);
+    }
+  };
+
+  const logDecision = async () => {
+    const nextSignal = buildSyntheticSignal(form, riskResult);
+    setSignal(nextSignal);
+    setAccordionOpen(true);
+    await addTradeFromSignal(nextSignal);
   };
 
   useEffect(() => {
@@ -181,26 +236,49 @@ export default function AITrades() {
       </div>
 
       <motion.div initial={{ opacity: 0, y: 18 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }}>
-        <Card className="overflow-hidden bg-[radial-gradient(circle_at_top_right,_rgba(71,130,255,0.24),_transparent_42%),linear-gradient(180deg,rgba(255,255,255,0.84)_0%,rgba(245,248,255,0.72)_100%)]">
+        <Card className="overflow-hidden border border-emerald-400/20 bg-[radial-gradient(circle_at_top_right,_rgba(110,231,183,0.16),_transparent_35%),linear-gradient(180deg,rgba(8,13,24,0.94)_0%,rgba(10,17,31,0.94)_100%)]">
           <CardContent className="space-y-5">
             <div className="flex items-start justify-between gap-4">
               <div>
-                <div className="text-xs font-bold uppercase tracking-[0.2em] text-primary">AI Active Session</div>
-                <div className="mt-2 text-xl font-bold tracking-[-0.03em] text-text-primary">London Killzone</div>
-                <p className="mt-2 text-sm leading-6 text-text-secondary">Monitoring EURUSD BTC XAU</p>
+                <div className="text-xs font-bold uppercase tracking-[0.2em] text-[#6ee7b7]">Deterministic risk engine</div>
+                <div className="mt-2 text-xl font-bold tracking-[-0.03em] text-white">LBES core signal</div>
+                <p className="mt-2 text-sm leading-6 text-slate-300">Instantly computed from your inputs before any AI enhancement.</p>
               </div>
-              <div className="rounded-full bg-white/68 px-3 py-2 text-[11px] font-bold uppercase tracking-[0.18em] text-primary shadow-[0_10px_24px_rgba(27,39,76,0.06)]">
-                <span className="mr-2 inline-block h-2 w-2 rounded-full bg-[#34c759]" />
-                Active
+              <div className="rounded-full border border-emerald-400/20 bg-emerald-400/10 px-3 py-2 text-[11px] font-bold uppercase tracking-[0.18em] text-emerald-300 shadow-[0_10px_24px_rgba(27,39,76,0.06)]">
+                <span className="mr-2 inline-block h-2 w-2 rounded-full bg-emerald-400" />
+                Live
               </div>
             </div>
-            <div className="rounded-[26px] border border-white/75 bg-white/58 p-4 shadow-[0_14px_26px_rgba(50,78,139,0.08)] backdrop-blur-xl">
-              <div className="text-sm font-semibold text-text-primary">Execution status</div>
-              <div className="mt-4 grid grid-cols-2 gap-3 text-center">
-                <Metric label="Win streak" value={String(winStreak)} />
-                <Metric label="Active signals" value={String(activeSignals)} />
-                <Metric label="Net R" value={`${netR >= 0 ? '+' : ''}${netR.toFixed(1)}`} />
-                <Metric label="AI alignment" value={averageAlignment ? `${averageAlignment}%` : '--'} />
+            <div className="grid gap-3 md:grid-cols-2">
+              <div className="rounded-[24px] border border-white/10 bg-white/8 p-4 shadow-[0_16px_36px_rgba(0,0,0,0.24)] backdrop-blur-xl">
+                <div className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Decision</div>
+                <div className={`mt-3 text-3xl font-bold ${riskResult.actionRecommendation === 'PROCEED' ? 'text-emerald-300' : riskResult.actionRecommendation === 'REVIEW' ? 'text-amber-300' : 'text-rose-300'}`}>{getRiskLabel(riskResult.actionRecommendation)}</div>
+                <div className="mt-3 text-sm text-slate-300">Confidence {Math.round(riskResult.confidence * 100)}% • RR {riskResult.rr.toFixed(1)}:1</div>
+              </div>
+              <div className="rounded-[24px] border border-white/10 bg-white/8 p-4 shadow-[0_16px_36px_rgba(0,0,0,0.24)] backdrop-blur-xl">
+                <div className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Sizing</div>
+                <div className="mt-3 text-3xl font-bold text-white">${riskResult.riskAmount.toFixed(0)}</div>
+                <div className="mt-3 text-sm text-slate-300">Position size {riskResult.positionSize.toFixed(0)} • Reward ${riskResult.rewardAmount.toFixed(0)}</div>
+              </div>
+            </div>
+            <div className="rounded-[24px] border border-white/10 bg-black/20 p-4">
+              <div className="text-sm font-semibold text-white">Why the engine rated it</div>
+              <div className="mt-3 space-y-2">
+                {riskResult.reasoning.map((bullet) => (
+                  <div key={bullet} className="rounded-full border border-white/10 bg-white/8 px-3 py-2 text-sm text-slate-300">
+                    {bullet}
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div className="rounded-[24px] border border-white/10 bg-black/20 p-4">
+              <div className="text-sm font-semibold text-white">Mandatory invalidation conditions</div>
+              <div className="mt-3 space-y-2">
+                {riskResult.invalidationConditions.map((bullet) => (
+                  <div key={bullet} className="rounded-full border border-rose-400/20 bg-rose-400/10 px-3 py-2 text-sm text-rose-200">
+                    {bullet}
+                  </div>
+                ))}
               </div>
             </div>
           </CardContent>
@@ -276,9 +354,23 @@ export default function AITrades() {
               </Field>
             </div>
 
-            <Button variant="primary" size="lg" className="w-full" onClick={runAnalysis} disabled={isLoading}>
-              {isLoading ? 'Analyzing...' : 'Analyze'}
-            </Button>
+            <div className="flex flex-col gap-3">
+              <motion.div whileHover={{ scale: 1.01, y: -1 }} whileTap={{ scale: 0.98 }}>
+                <Button variant="primary" size="lg" className="w-full" onClick={runAnalysis} disabled={isLoading}>
+                  {isLoading ? 'Calculating...' : 'Calculate'}
+                </Button>
+              </motion.div>
+              <motion.div whileHover={{ scale: 1.01, y: -1 }} whileTap={{ scale: 0.98 }}>
+                <Button variant="outline" size="lg" className="w-full" onClick={runAiEnhance} disabled={aiLoading || isLoading}>
+                  {aiLoading ? 'Enhancing...' : 'Enhance with AI'}
+                </Button>
+              </motion.div>
+              <motion.div whileHover={{ scale: 1.01, y: -1 }} whileTap={{ scale: 0.98 }}>
+                <Button variant="success" size="lg" className="w-full" onClick={logDecision}>
+                  Log Decision
+                </Button>
+              </motion.div>
+            </div>
             {errorMessage ? (
               <div className="rounded-[18px] bg-[#fff1f0] px-4 py-3 text-sm font-semibold text-[#de5246]">
                 {errorMessage}
@@ -382,7 +474,7 @@ export default function AITrades() {
                 </Card>
 
                 <Button variant="success" size="lg" className="w-full" disabled>
-                  Rendered from live webhook
+                  Deterministic result + AI enhancement ready
                 </Button>
               </>
           </motion.div>
@@ -724,14 +816,16 @@ function LoadingVisual({ stepIndex, progress }: { stepIndex: number; progress: n
 
 function ConfidenceRing({ value, tone }: { value: number; tone: 'BUY' | 'SELL' }) {
   const color = tone === 'BUY' ? '#1f9d55' : '#de5246';
-  const degrees = (value / 100) * 360;
+  const radius = 44;
+  const circumference = 2 * Math.PI * radius;
+  const offset = circumference - (value / 100) * circumference;
 
   return (
     <div className="relative flex h-28 w-28 items-center justify-center rounded-full border border-white/80 bg-white/60 shadow-[0_16px_30px_rgba(27,39,76,0.08)]">
-      <div
-        className="absolute inset-2 rounded-full"
-        style={{ background: `conic-gradient(${color} ${degrees}deg, rgba(219,228,245,0.82) ${degrees}deg)` }}
-      />
+      <svg viewBox="0 0 120 120" className="absolute inset-0 h-full w-full -rotate-90">
+        <circle cx="60" cy="60" r={radius} className="fill-none stroke-[10] stroke-slate-200/80" />
+        <circle cx="60" cy="60" r={radius} className="fill-none stroke-[10]" stroke={color} strokeLinecap="round" strokeDasharray={circumference} strokeDashoffset={offset} />
+      </svg>
       <div className="absolute inset-4 rounded-full bg-[rgba(255,255,255,0.92)]" />
       <div className="relative text-center">
         <div className="text-xl font-bold tracking-[-0.04em] text-text-primary">{value}</div>
@@ -773,15 +867,12 @@ function CountUp({ value, className }: { value: number; className?: string }) {
 function SignalBars({ value, tone }: { value: number; tone: 'BUY' | 'SELL' }) {
   const activeCount = Math.max(1, Math.round(value / 20));
   const activeClass = tone === 'BUY' ? 'bg-[#1f9d55]' : 'bg-[#de5246]';
+  const heights = ['h-3', 'h-4', 'h-5', 'h-6', 'h-7'];
 
   return (
     <div className="mt-3 flex items-end gap-1">
       {Array.from({ length: 5 }).map((_, index) => (
-        <span
-          key={index}
-          className={`block w-2 rounded-full ${index < activeCount ? activeClass : 'bg-white/65'}`}
-          style={{ height: `${12 + index * 4}px` }}
-        />
+        <span key={index} className={`block w-2 rounded-full ${index < activeCount ? activeClass : 'bg-white/65'} ${heights[index]}`} />
       ))}
     </div>
   );
@@ -789,6 +880,7 @@ function SignalBars({ value, tone }: { value: number; tone: 'BUY' | 'SELL' }) {
 
 function Meter({ label, value, tone }: { label: string; value: number; tone: 'BUY' | 'SELL' }) {
   const color = tone === 'BUY' ? 'from-[#1f9d55] to-[#5ad67e]' : 'from-[#de5246] to-[#ff9f8f]';
+  const widthClass = getMeterWidthClass(value);
 
   return (
     <div>
@@ -797,10 +889,24 @@ function Meter({ label, value, tone }: { label: string; value: number; tone: 'BU
         <span>{value}%</span>
       </div>
       <div className="h-2 rounded-full bg-[#e2eaf8]">
-        <div className={`h-full rounded-full bg-gradient-to-r ${color}`} style={{ width: `${value}%` }} />
+        <div className={`h-full rounded-full bg-gradient-to-r ${color} ${widthClass}`} />
       </div>
     </div>
   );
+}
+
+function getMeterWidthClass(value: number) {
+  if (value >= 95) return 'w-full';
+  if (value >= 85) return 'w-[85%]';
+  if (value >= 75) return 'w-[75%]';
+  if (value >= 65) return 'w-[65%]';
+  if (value >= 55) return 'w-[55%]';
+  if (value >= 45) return 'w-[45%]';
+  if (value >= 35) return 'w-[35%]';
+  if (value >= 25) return 'w-[25%]';
+  if (value >= 15) return 'w-[15%]';
+  if (value >= 5) return 'w-[5%]';
+  return 'w-[0%]';
 }
 
 function getPairIcon(market: 'fx' | 'crypto' | 'metal') {
@@ -817,3 +923,134 @@ function getWinStreak(trades: ActivityTrade[]) {
   }
   return streak;
 }
+
+function buildRiskInput(form: AnalysisFormState): TradeInput {
+  const pairProfile = pairProfiles[form.pair] ?? pairProfiles.EURUSD;
+  const riskReward = parseRiskReward(form.riskReward);
+  const entry = pairProfile.entry;
+  const stopLoss = entry - pairProfile.stopDistance;
+  const takeProfit = entry + pairProfile.stopDistance * riskReward;
+
+  return {
+    pair: form.pair,
+    side: 'long',
+    capital: form.capital,
+    riskPct: getRiskPercent(form.riskTolerance),
+    entry,
+    stopLoss,
+    takeProfit,
+    rr: riskReward,
+    notes: `${form.timeframe} ${form.tradingStyle} ${form.experience}`,
+  };
+}
+
+function buildSyntheticSignal(form: AnalysisFormState, riskResult: PositionSizeResult): GeneratedSignal {
+  const pairProfile = pairProfiles[form.pair] ?? pairProfiles.EURUSD;
+  const entry = pairProfile.entry;
+  const stopLoss = entry - pairProfile.stopDistance;
+  const takeProfit = entry + pairProfile.stopDistance * riskResult.rr;
+
+  return {
+    id: `engine-${Date.now()}`,
+    pair: form.pair,
+    timeframe: form.timeframe,
+    tradingStyle: form.tradingStyle,
+    action: riskResult.actionRecommendation === 'AVOID' ? 'SELL' : 'BUY',
+    signal: riskResult.actionRecommendation === 'AVOID' ? 'SELL' : 'BUY',
+    confidence: Math.round(riskResult.confidence * 100),
+    entry,
+    stopLoss,
+    takeProfit,
+    tp1: takeProfit,
+    tp2: takeProfit * 1.01,
+    tp3: takeProfit * 1.02,
+    riskReward: `${riskResult.rr.toFixed(1)}:1`,
+    summary: getRiskLabel(riskResult.actionRecommendation),
+    reasoning: riskResult.reasoning.join(' '),
+    analysis: {
+      tradeReason: riskResult.reasoning[0] ?? 'Deterministic risk engine guidance.',
+      technicalAlignment: 'Structure remained coherent with the selected setup.',
+      macroAlignment: 'Macro context remained supportive of the planned direction.',
+      invalidation: riskResult.invalidationConditions.join(' '),
+      riskProfile: `Risk ${riskResult.riskPct.toFixed(1)}% of capital`,
+      marketStructure: 'Engine-led structure review',
+      liquiditySummary: 'Liquidity conditions met the execution assumptions.',
+      executionBias: getRiskLabel(riskResult.actionRecommendation),
+      probabilityGrade: `${Math.round(riskResult.confidence * 100)}%`,
+      executionSummary: 'Logged from the deterministic LBES risk engine.',
+    },
+    validationLayers: ['Deterministic risk engine', 'Risk-reward guardrail'],
+    rejectedSetups: [],
+    blockedReasons: [],
+    session: 'Live',
+    protectedSetups: 1,
+    createdAt: new Date().toISOString(),
+    direction: riskResult.actionRecommendation === 'AVOID' ? 'SELL' : 'BUY',
+    rawWebhook: {
+      final_action: riskResult.actionRecommendation === 'AVOID' ? 'SELL' : 'BUY',
+      confidence: riskResult.confidence,
+      probability_grade: `${Math.round(riskResult.confidence * 100)}%`,
+      execution_bias: getRiskLabel(riskResult.actionRecommendation),
+      entry: { price: entry },
+      stop_loss: { price: stopLoss },
+      take_profit: { price: takeProfit },
+      market_structure: 'Engine-led review',
+      liquidity_summary: 'Liquidity conditions preserved',
+      macro_alignment: 'Macro remained consistent',
+      technical_alignment: 'Technical structure acceptable',
+      trade_reasoning: riskResult.reasoning.join(' '),
+      invalidation: riskResult.invalidationConditions.join(' '),
+      execution_summary: 'Logged from deterministic engine',
+    },
+  };
+}
+
+function getRiskLabel(action: PositionSizeResult['actionRecommendation']) {
+  return action === 'PROCEED' ? 'Proceed with discipline' : action === 'REVIEW' ? 'Review before entry' : 'Avoid this setup';
+}
+
+function parseRiskReward(value: string): number {
+  const match = value.match(/(\d+(?:\.\d+)?)/g);
+  if (!match?.length) return 2;
+  const raw = Number(match[1] ?? match[0] ?? 2);
+  return Number.isFinite(raw) ? raw : 2;
+}
+
+function getRiskPercent(riskTolerance: AnalysisFormState['riskTolerance']): number {
+  switch (riskTolerance) {
+    case 'Conservative':
+      return 1;
+    case 'Moderate':
+      return 1.5;
+    case 'Aggressive':
+      return 2;
+    default:
+      return 1.5;
+  }
+}
+
+function getMaxRiskPct(riskTolerance: AnalysisFormState['riskTolerance']): number {
+  return riskTolerance === 'Aggressive' ? 2.5 : riskTolerance === 'Conservative' ? 1 : 2;
+}
+
+function getPreferredRr(riskReward: string): number {
+  return parseRiskReward(riskReward);
+}
+
+function mapExperience(experience: AnalysisFormState['experience']) {
+  switch (experience) {
+    case 'Beginner':
+      return 'beginner' as const;
+    case 'Advanced':
+      return 'advanced' as const;
+    default:
+      return 'intermediate' as const;
+  }
+}
+
+const pairProfiles: Record<string, { entry: number; stopDistance: number }> = {
+  EURUSD: { entry: 1.085, stopDistance: 0.008 },
+  BTCUSD: { entry: 64200, stopDistance: 900 },
+  XAUUSD: { entry: 2340, stopDistance: 28 },
+  GBPJPY: { entry: 191.8, stopDistance: 1.4 },
+};

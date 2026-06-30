@@ -8,6 +8,7 @@ export type TraderProfile = {
   accountSize: number;
   currency: string;
   experience: 'Beginner' | 'Intermediate' | 'Advanced';
+  onboardingCompleted: boolean;
 };
 
 export const defaultTraderProfile: TraderProfile = {
@@ -17,6 +18,7 @@ export const defaultTraderProfile: TraderProfile = {
   accountSize: 10000,
   currency: 'USD',
   experience: 'Intermediate',
+  onboardingCompleted: false,
 };
 
 export async function ensureProfile(user: User) {
@@ -78,6 +80,7 @@ function fromProfileRow(row: Record<string, unknown>): TraderProfile {
     accountSize: Number(row?.account_size ?? defaultTraderProfile.accountSize),
     currency: (row?.currency as string) ?? defaultTraderProfile.currency,
     experience: fromDbExperience(row?.experience as string | null | undefined),
+    onboardingCompleted: Boolean(row?.onboarding_completed ?? false),
   };
 }
 
@@ -89,6 +92,7 @@ function toProfileRow(profile: Partial<TraderProfile>) {
   if (profile.accountSize !== undefined) row.account_size = profile.accountSize;
   if (profile.currency !== undefined) row.currency = profile.currency;
   if (profile.experience !== undefined) row.experience = profile.experience;
+  if (profile.onboardingCompleted !== undefined) row.onboarding_completed = profile.onboardingCompleted;
   return row;
 }
 

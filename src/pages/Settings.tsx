@@ -5,6 +5,7 @@ import { useTradesStore } from '../store/useTradesStore';
 import { useAuthStore } from '../store/useAuthStore';
 import { SettingsSection } from '../components/SettingsSection';
 import { HelpSupportSection } from '../components/HelpSupportSection';
+import { OnboardingWizard } from '../components/OnboardingWizard';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
 import { Switch } from '../components/ui/Switch';
@@ -100,6 +101,8 @@ const Settings = () => {
       </div>
 
       <div className="space-y-4">
+        <OnboardingWizard />
+
         {/* ACCOUNT / CLOUD SYNC */}
         <SettingsSection title="Account & Sync" icon={<Cloud className="w-5 h-5" />} defaultOpen>
           <div className="space-y-4">
@@ -261,6 +264,8 @@ const Settings = () => {
                 <input 
                   type="file" 
                   accept=".json"
+                  aria-label="Import trade backup"
+                  title="Import trade backup"
                   onChange={handleImport}
                   className="absolute inset-0 opacity-0 cursor-pointer"
                 />
